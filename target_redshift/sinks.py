@@ -2,17 +2,17 @@
 
 from __future__ import annotations
 
-import uuid
-from singer_sdk.sinks import SQLSink
-import os
 import csv
 import json
-import sqlalchemy
-import boto3
-from .connector import RedshiftConnector
-from typing import List, Any, Iterable, Dict, Optional
-from botocore.exceptions import ClientError
+import os
+import uuid
+from functools import cached_property
+from typing import Any, Dict, Iterable, List, Optional
 
+import boto3
+import sqlalchemy
+from botocore.exceptions import ClientError
+from redshift_connector import Cursor
 from singer_sdk.helpers._compat import (
     date_fromisoformat,
     datetime_fromisoformat,
@@ -23,9 +23,11 @@ from singer_sdk.helpers._typing import (
     get_datelike_property_type,
     handle_invalid_timestamp_in_record,
 )
+from singer_sdk.sinks import SQLSink
 
 from target_redshift.connector import RedshiftConnector
-from redshift_connector import Cursor
+
+from .connector import RedshiftConnector
 
 
 class RedshiftSink(SQLSink):
@@ -39,11 +41,20 @@ class RedshiftSink(SQLSink):
         super().__init__(*args, **kwargs)
         self.temp_table_name = self.generate_temp_table_name()
 
-        region = self.config.get("s3_region")
-        if region is None:
-            self.s3_client = boto3.client("s3")
+    @cached_property
+    def s3_client(self):
+        aws_s3_configs = self.config["aws_credentials"]
+        if aws_s3_configs:
+            boto3_session = boto3.Session(
+                aws_access_key_id=aws_s3_configs.get("aws_access_key_id"),
+                aws_secret_access_key=aws_s3_configs.get("aws_secret_access_key"),
+                aws_session_token=aws_s3_configs.get("aws_session_token"),
+                region_name=aws_s3_configs.get("aws_region_name"),
+            )
         else:
-            self.s3_client = boto3.client("s3", region_name=region)
+            boto3_session = boto3.Session()
+
+        return boto3_session.client("s3")
 
     @property
     def schema_name(self) -> str | None:
@@ -196,14 +207,22 @@ class RedshiftSink(SQLSink):
             to_table_key = to_table.columns[key]
             join_predicates.append(from_table_key == to_table_key)
 
-        join_condition = sqlalchemy.and_(*join_predicates)
-        merge_sql = f"""
+        if join_predicates:
+            join_condition = sqlalchemy.and_(*join_predicates)
+            sql_statement = f"""
             MERGE INTO {self.connector.quote(str(to_table))}
             USING {self.connector.quote(str(from_table))}
             ON {join_condition}
             REMOVE DUPLICATES
             """
-        cursor.execute(merge_sql)
+        else:
+            sql_statement = f"""
+            INSERT INTO {self.connector.quote(str(to_table))}
+            SELECT *
+            FROM {self.connector.quote(str(from_table))}
+            """
+
+        cursor.execute(sql_statement)
         return None
 
     def write_csv(self, records: List[dict]) -> int:
@@ -215,9 +234,16 @@ class RedshiftSink(SQLSink):
             os.mkdir(self.config["temp_dir"])
         except:
             pass
-        object_keys = [key for key, value in self.schema["properties"].items() if "object" in value["type"] or "array" in value["type"]]
+        object_keys = [
+            key
+            for key, value in self.schema["properties"].items()
+            if "object" in value["type"] or "array" in value["type"]
+        ]
         records = [
-            {key: (json.dumps(value).replace("None", "") if key in object_keys else value) for key, value in record.items()}
+            {
+                key: (json.dumps(value).replace("None", "") if key in object_keys else value)
+                for key, value in record.items()
+            }
             for record in records
         ]
         with open(self.path, "w", encoding="utf-8", newline="") as fp:
