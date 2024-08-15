@@ -236,6 +236,17 @@ class TargetRedshift(SQLTarget):
                 + " Note if sqlalchemy_url is set this will be ignored."
             ),
         ),
+        th.Property(
+            "aws_credentials",
+            th.ObjectType(
+                th.Property("aws_access_key_id", th.StringType, required=False),
+                th.Property("aws_secret_access_key", th.StringType, required=False),
+                th.Property("aws_session_token", th.StringType, required=False),
+                th.Property("aws_region_name", th.StringType, required=False),
+            ),
+            default=None,
+            required=False,
+        ),
     ).to_dict()
 
     default_sink_class = RedshiftSink
