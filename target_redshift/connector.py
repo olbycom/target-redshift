@@ -1,33 +1,23 @@
 """Common SQL connectors for Streams and Sinks."""
 
 from __future__ import annotations
+
 import typing as t
+from contextlib import contextmanager
 from typing import cast
 
-import simplejson
-from contextlib import contextmanager
 import boto3
-
-from singer_sdk.typing import _jsonschema_type_check
+import redshift_connector
+from redshift_connector import Cursor
 from singer_sdk import typing as th
 from singer_sdk.connectors import SQLConnector
 from singer_sdk.helpers._typing import get_datelike_property_type
-from redshift_connector import Cursor
-import redshift_connector
-
+from singer_sdk.typing import _jsonschema_type_check
+from sqlalchemy import DDL, Column, MetaData, Table
 from sqlalchemy.engine.url import URL
-from sqlalchemy_redshift.dialect import SUPER, BIGINT, VARCHAR, DOUBLE_PRECISION
-from sqlalchemy.types import (
-    BOOLEAN,
-    DATE,
-    DATETIME,
-    DECIMAL,
-    TIME,
-    VARCHAR,
-)
-from sqlalchemy.schema import CreateTable, DropTable, CreateSchema
-from sqlalchemy.types import TypeEngine
-from sqlalchemy import Table, MetaData, DDL, Column
+from sqlalchemy.schema import CreateSchema, CreateTable, DropTable
+from sqlalchemy.types import BOOLEAN, DATE, DATETIME, DECIMAL, TIME, VARCHAR, TypeEngine
+from sqlalchemy_redshift.dialect import BIGINT, DOUBLE_PRECISION, SUPER, VARCHAR
 
 
 class RedshiftConnector(SQLConnector):
@@ -520,4 +510,3 @@ class RedshiftConnector(SQLConnector):
             return response["DbUser"], response["DbPassword"]
         else:
             return self.config["user"], self.config["password"]
-
